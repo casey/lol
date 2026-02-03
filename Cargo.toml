@@ -6,4 +6,16 @@ description = "ayy lmao"
 license = "CC0-1.0"
 
 [dependencies]
+camino = "1.2.2"
 clap = { version = "4.5.56", features = ["derive"] }
+snafu = "0.8.9"
+tempfile = "3.24.0"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+arbitrary-source-item-ordering = "deny"
+pedantic = { level = "deny", priority = -1 }
+wildcard_imports = "allow"
+
+[lints.rust]
+unreachable_pub = "deny"
