@@ -10,14 +10,23 @@ pub(crate) struct Prompt {
 
 impl Display for Prompt {
   fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+    writeln!(f, "# System Prompt")?;
+    writeln!(
+      f,
+      "You have been invoked as a script interpreter. Unless requested, do not include commentary \
+      in your response. Your response will be printed verbatum to standard output. Unless \
+      requested, do not format your output as markdown or enclose your response in markdown code \
+      blocks."
+    )?;
+    writeln!(f)?;
     if let Some(script) = &self.script {
+      writeln!(f, "# Script")?;
       writeln!(f, "{script}")?;
     } else {
       writeln!(
         f,
-        "You have been invoked from the command line. Please infer what the user wants you to do \
-        from the program name, arguments, and current directory. May this prayer guide you on your \
-        way. Amen."
+        "Please infer what the user wants you to do from the program name, arguments, and current \
+        directory. May this prayer guide you on your way. Amen."
       )?;
     }
     writeln!(f, "---")?;
