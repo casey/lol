@@ -1,9 +1,13 @@
 [package]
 name = "lol"
 version = "0.0.0"
-edition = "2024"
+authors = ["Casey Rodarmor <casey@rodarmor.com>"]
+categories = ["command-line-utilities"]
 description = "ayy lmao"
+edition = "2024"
+homepage = "https://github.com/casey/lol"
 license = "CC0-1.0"
+repository = "https://github.com/casey/lol"
 
 [dependencies]
 camino = "1.2.2"
@@ -19,3 +23,7 @@ wildcard_imports = "allow"
 
 [lints.rust]
 unreachable_pub = "deny"
+
+[profile.release]
+lto = true
+codegen-units = 1
