@@ -1,4 +1,6 @@
 use {
+  self::{arguments::Arguments, error::Error, prompt::Prompt},
+  camino::{Utf8Path, Utf8PathBuf},
   clap::{
     Parser,
     builder::{
@@ -6,90 +8,81 @@ use {
       styling::{AnsiColor, Effects},
     },
   },
+  snafu::{ErrorCompat, IntoError, OptionExt, ResultExt, Snafu},
   std::{
-    fs::{self, File},
-    io::{self, IsTerminal, Read, Write},
+    env,
+    fmt::{self, Display, Formatter},
+    fs::{self},
+    io::{self, IsTerminal},
     os::unix::process::CommandExt,
     path::PathBuf,
-    process::Command,
+    process::{self, Command},
   },
+  tempfile::NamedTempFile,
 };
 
-#[derive(Parser)]
-#[command(
-  version,
-  styles = Styles::styled()
-    .header(AnsiColor::Green.on_default() | Effects::BOLD)
-    .usage(AnsiColor::Green.on_default() | Effects::BOLD)
-    .literal(AnsiColor::Blue.on_default() | Effects::BOLD)
-    .placeholder(AnsiColor::Cyan.on_default()))
-]
-pub(crate) struct Arguments {
-  script: PathBuf,
-  arguments: Vec<String>,
-}
+mod arguments;
+mod error;
+mod prompt;
 
 fn main() {
+  if let Err(err) = run() {
+    eprintln!("error: {err}");
+
+    let causes = err.iter_chain().skip(1).count();
+
+    for (i, err) in err.iter_chain().skip(1).enumerate() {
+      eprintln!("       {}─ {err}", if i < causes - 1 { '├' } else { '└' });
+    }
+
+    process::exit(1);
+  }
+}
+
+fn run() -> Result<(), Error> {
   let arguments = Arguments::parse();
 
-  let content = match fs::read_to_string(&arguments.script) {
-    Ok(c) => c,
-    Err(e) => {
-      eprintln!("Failed to read {}: {}", &arguments.script.display(), e);
-      std::process::exit(1);
-    }
-  };
+  let script = fs::read_to_string(&arguments.script).context(error::Script {
+    path: &arguments.script,
+  })?;
 
-  let prompt = if content.starts_with("#!") {
-    content.lines().skip(1).collect::<Vec<&str>>().join("\n")
+  let script = if script.starts_with("#!") {
+    script.lines().skip(1).collect::<Vec<&str>>().join("\n")
   } else {
-    content
+    script
   };
 
-  let prompt = prompt.trim_start().to_string();
+  let script = script.trim().to_string();
 
-  if prompt.is_empty() {
-    eprintln!("Nothing to do. Write a description of what you want done.");
-    std::process::exit(1);
-  }
+  let stdin = if io::stdin().is_terminal() {
+    None
+  } else {
+    let mut file = NamedTempFile::new().context(error::Tempfile)?;
+    let path = Utf8Path::from_path(file.path())
+      .context(error::CurrentDirUnicode { path: file.path() })?
+      .to_owned();
+    io::copy(&mut io::stdin(), &mut file).context(error::Stdin)?;
+    Some((file, path))
+  };
 
-  let mut full_prompt = prompt;
+  let prompt = Prompt {
+    arguments: arguments.arguments,
+    current_directory: Utf8PathBuf::from_path_buf(env::current_dir().context(error::CurrentDir)?)
+      .map_err(|path| error::CurrentDirUnicode { path }.build())?,
+    program: arguments.script.to_string(),
+    script: if script.is_empty() {
+      None
+    } else {
+      Some(script)
+    },
+    stdin: stdin.as_ref().map(|(_file, path)| path.into()),
+  };
 
-  if !arguments.arguments.is_empty() {
-    full_prompt.push_str("\n\n---\n\n## Arguments\n\n");
-    for (i, arg) in arguments.arguments.iter().enumerate() {
-      full_prompt.push_str(&format!("- `${}`: `{}`\n", i + 1, arg));
-    }
-  }
-
-  if !io::stdin().is_terminal() {
-    let mut stdin_content = Vec::new();
-    if let Ok(n) = io::stdin().read_to_end(&mut stdin_content) {
-      if n > 0 {
-        let stdin_path = format!("/tmp/dwim-stdin-{}", std::process::id());
-        match File::create(&stdin_path).and_then(|mut f| f.write_all(&stdin_content)) {
-          Ok(()) => {
-            full_prompt.push_str("\n\n---\n\n## Stdin\n\n");
-            full_prompt.push_str(&format!(
-              "Input was piped to this script. Contents are available at: `{}`\n",
-              stdin_path
-            ));
-          }
-          Err(e) => {
-            eprintln!("Warning: failed to write stdin to temp file: {}", e);
-          }
-        }
-      }
-    }
-  }
-
-  let err = Command::new("claude")
+  let source = Command::new("claude")
     .arg("--dangerously-skip-permissions")
     .arg("--print")
-    .arg(&full_prompt)
+    .arg(prompt.to_string())
     .exec();
 
-  eprintln!("Failed to exec claude: {}", err);
-  eprintln!("Is claude CLI installed? Try: npm install -g @anthropic-ai/claude-code");
-  std::process::exit(1);
+  Err(error::Exec.into_error(source))
 }
