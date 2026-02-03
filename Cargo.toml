@@ -1,6 +1,6 @@
 [package]
 name = "lol"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Casey Rodarmor <casey@rodarmor.com>"]
 categories = ["command-line-utilities"]
 description = "ayy lmao"
